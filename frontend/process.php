@@ -14,12 +14,11 @@ $khoa          = $_REQUEST['khoa'] ?? 'Ngân hàng';
 $khoa_nganh    = $_REQUEST['khoa_nganh'] ?? 'Khoa Ngân hàng';
 $hinh_thuc_thi = $_REQUEST['hinh_thuc_thi'] ?? 'Tất cả hình thức';
 $thoi_gian     = $_REQUEST['thoi_gian'] ?? 'Cuối kì - Đợt 1';
-$exam_date     = $_REQUEST['exam_date'] ?? 'all'; // Nhận biến lọc ngày cụ thể từ UI (định dạng YYYY-MM-DD)
+$exam_date     = $_REQUEST['exam_date'] ?? 'all'; 
 
 // CHUẨN HÓA DỮ LIỆU để khớp với cột major lưu trong SQLite
 $nganh_truy_van = str_replace('Khoa ', '', $khoa_nganh);
 
-// Đồng bộ hóa từ viết tắt nếu trên UI giao diện hiển thị không khớp hoàn toàn với DB
 if (strpos($nganh_truy_van, 'Hệ thống thông tin') !== false) {
     $nganh_truy_van = 'Hệ thống thông tin quản lý';
 }
@@ -42,113 +41,109 @@ if (file_exists($python_script)) {
 
     $command = "python $python_script $cmd_nam_hoc $cmd_hoc_ki $cmd_nganh $cmd_hinh_thuc $cmd_dot_thi 2>&1";
     exec($command, $output, $return_var);
-
-    if ($return_var !== 0) {
-        echo "<div class='alert alert-warning m-3'><strong>Thông báo hệ thống:</strong> Thuật toán GA kích hoạt dòng lệnh trả về mã cảnh báo. (Vui lòng đảm bảo Python đã được cài đặt và thiết lập biến môi trường).</div>";
-    }
 }
 // =========================================================================================
 
 $lich_thi_hoan_thinh = [];
 
 try {
-    // 4. TRUY VẤN LẤY DỮ LIỆU ĐÃ ĐỒNG BỘ THEO TÊN CỘT GỐC TRONG SQLITE
-    $sql_schedule = "SELECT 
-                        es.exam_id,
-                        c.course_name,
-                        t.exam_date,
-                        t.start_time,
-                        es.room_id,
-                        er.building,
-                        er.capacity
+    // 4. TRUY VẤN: Lấy danh sách Lớp học phần đã được xếp lịch
+    $sql_sections = "SELECT DISTINCT es.section_id, c.course_name, t.exam_date, t.start_time, t.timeslot_id
                      FROM ExamSchedule es
-                     JOIN Exam e ON es.exam_id = e.exam_id
-                     JOIN Course c ON e.course_id = c.course_id
+                     JOIN Course c ON SUBSTR(es.section_id, 1, INSTR(es.section_id, '_') - 1) = c.course_id
                      JOIN Timeslot t ON es.timeslot_id = t.timeslot_id
-                     JOIN ExamRoom er ON es.room_id = er.room_id
                      WHERE 1=1";
                      
     $main_params = [];
-    
-    //gán chặt điều kiện lọc ngày thi vào SQL 
     if ($exam_date !== 'all' && !empty($exam_date)) {
-        $sql_schedule .= " AND t.exam_date = :exam_date";
+        $sql_sections .= " AND t.exam_date = :exam_date";
         $main_params[':exam_date'] = $exam_date;
     }
                      
-    $stmt = $conn->prepare($sql_schedule);
-    $stmt->execute($main_params);
-    $lich_thi_raw = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $stmt_sec = $conn->prepare($sql_sections);
+    $stmt_sec->execute($main_params);
+    $sections = $stmt_sec->fetchAll(PDO::FETCH_ASSOC);
 
-    // 5. Với mỗi lịch thi, lấy danh sách sinh viên thực tế thuộc ngành đã lọc ngồi phòng đó
-    foreach ($lich_thi_raw as $row) {
-        $exam_id = $row['exam_id'];
-        $room_id = $row['room_id'];
-        $building = strtoupper(trim($row['building'])); // Lấy tên tòa nhà (A hoặc C)
-        
-        // ==================== ĐỊNH DẠNG HÌNH THỨC HIỂN THỊ THEO TÒA NHÀ ====================
-        // Tòa C mặc định là phòng máy -> Trắc nghiệm máy. Tòa A mặc định là phòng học -> Lý thuyết tự luận.
-        if ($building === 'C') {
-            $is_trac_nghiem = true;
-            $phong_hien_thi = $room_id . " (Trắc nghiệm máy)";
-        } else {
-            $is_trac_nghiem = false;
-            $phong_hien_thi = $room_id . " (Lý thuyết tự luận)";
-        }
-
-        // Kiểm tra điều kiện lọc hình thức thi được gửi từ giao diện bộ lọc  sang
-        if ($hinh_thuc_thi === 'Lý thuyết tự luận' && $is_trac_nghiem) {
-            continue; // Nếu chọn Tự luận nhưng phòng thuộc Tòa C (Máy) -> Bỏ qua không hiển thị
-        }
-        if ($hinh_thuc_thi === 'Trắc nghiệm máy' && !$is_trac_nghiem) {
-            continue; // Nếu chọn Trắc nghiệm nhưng phòng thuộc Tòa A (Tự luận) -> Bỏ qua không hiển thị
-        }
-        // ===================================================================================
+    // 5. Duyệt qua từng lớp học phần để tính toán Sĩ số, Ca thi và Gom cụm phòng thi được cấp phát
+    foreach ($sections as $sec) {
+        $section_id = $sec['section_id'];
         
         if (!empty($nganh_truy_van)) {
-            $sql_students = "SELECT s.student_id AS mssv, s.full_name AS ho_ten, s.major AS lop_ql
-                             FROM StudentExamRoom ser
-                             JOIN Student s ON ser.student_id = s.student_id
-                             WHERE ser.exam_id = :exam_id AND ser.room_id = :room_id AND s.major LIKE :nganh";
-            $params = [
-                ':exam_id' => $exam_id, 
-                ':room_id' => $room_id,
-                ':nganh'   => '%' . $nganh_truy_van . '%'
-            ];
+            $sql_students = "SELECT s.student_id AS mssv, s.full_name AS ho_ten, s.major AS lop_ql, sr.room_id
+                             FROM StudentExamAssignment sea
+                             JOIN SCHEDULE_ROOM sr ON sea.schedule_room_id = sr.schedule_room_id
+                             JOIN ExamSchedule es ON sr.schedule_id = es.schedule_id
+                             JOIN Student s ON sea.student_id = s.student_id
+                             WHERE es.section_id = :section_id AND s.major LIKE :nganh";
+            $stud_params = [':section_id' => $section_id, ':nganh' => '%' . $nganh_truy_van . '%'];
         } else {
-            $sql_students = "SELECT s.student_id AS mssv, s.full_name AS ho_ten, s.major AS lop_ql
-                             FROM StudentExamRoom ser
-                             JOIN Student s ON ser.student_id = s.student_id
-                             WHERE ser.exam_id = :exam_id AND ser.room_id = :room_id";
-            $params = [
-                ':exam_id' => $exam_id, 
-                ':room_id' => $room_id
-            ];
+            $sql_students = "SELECT s.student_id AS mssv, s.full_name AS ho_ten, s.major AS lop_ql, sr.room_id
+                             FROM StudentExamAssignment sea
+                             JOIN SCHEDULE_ROOM sr ON sea.schedule_room_id = sr.schedule_room_id
+                             JOIN ExamSchedule es ON sr.schedule_id = es.schedule_id
+                             JOIN Student s ON sea.student_id = s.student_id
+                             WHERE es.section_id = :section_id";
+            $stud_params = [':section_id' => $section_id];
         }
-                     
-        $stmt_stud = $conn->prepare($sql_students);
-        $stmt_stud->execute($params);
-        $students_in_room = $stmt_stud->fetchAll(PDO::FETCH_ASSOC);
         
-        // Chỉ đẩy lịch thi này ra bảng hiển thị nếu phòng thi chứa sinh viên thỏa mãn điều kiện
-        if (count($students_in_room) > 0) {
-            $lich_thi_hoan_thinh[] = [
-                "lhp"      => $row['exam_id'],
-                "tenHp"    => $row['course_name'],
-                "ngayThi"  => !empty($row['exam_date']) ? date("d/m/Y", strtotime($row['exam_date'])) : "Chưa xếp",
-                "gioThi"   => !empty($row['start_time']) ? substr($row['start_time'], 0, 5) : "Chưa xếp",
-                "phongThi" => $phong_hien_thi,
-                "diaDiem"  => "Toà " . $row['building'],
-                "students" => $students_in_room
-            ];
+        $stmt_stud = $conn->prepare($sql_students);
+        $stmt_stud->execute($stud_params);
+        $students_in_section = $stmt_stud->fetchAll(PDO::FETCH_ASSOC);
+        
+        if (count($students_in_section) === 0) {
+            continue;
         }
+
+        $sql_rooms = "SELECT DISTINCT sr.room_id, er.building 
+                      FROM SCHEDULE_ROOM sr
+                      JOIN ExamSchedule es ON sr.schedule_id = es.schedule_id
+                      JOIN ExamRoom er ON sr.room_id = er.room_id
+                      WHERE es.section_id = :section_id";
+        $stmt_rooms = $conn->prepare($sql_rooms);
+        $stmt_rooms->execute([':section_id' => $section_id]);
+        $rooms_in_section = $stmt_rooms->fetchAll(PDO::FETCH_ASSOC);
+
+        $room_names = [];
+        $buildings = [];
+        foreach ($rooms_in_section as $r) {
+            $room_names[] = $r['room_id'];
+            $buildings[] = strtoupper(trim($r['building']));
+        }
+        
+        $ds_phong_thi = implode(', ', $room_names);
+        
+        $is_trac_nghiem = in_array('C', $buildings);
+        if ($is_trac_nghiem) {
+            $phong_hien_thi = $ds_phong_thi . " (Trắc nghiệm máy)";
+            $dia_diem_hien_thi = "Toà C";
+        } else {
+            $phong_hien_thi = $ds_phong_thi . " (Lý thuyết tự luận)";
+            $dia_diem_hien_thi = !empty($buildings) ? "Toà " . implode('/', array_unique($buildings)) : "Khu vực HUB";
+        }
+
+        if ($hinh_thuc_thi === 'Lý thuyết tự luận' && $is_trac_nghiem) continue;
+        if ($hinh_thuc_thi === 'Trắc nghiệm máy' && !$is_trac_nghiem) continue;
+
+        $ts_id = $sec['timeslot_id'];
+        $start_t = !empty($sec['start_time']) ? substr($sec['start_time'], 0, 5) : "00:00";
+        $ca_thi_label = "Ca " . $ts_id . " (" . $start_t . ")";
+
+        $lich_thi_hoan_thinh[] = [
+            "lhp"      => $section_id,
+            "tenHp"    => $sec['course_name'],
+            "siSo"     => count($students_in_section) . " SV",
+            "ngayThi"  => !empty($sec['exam_date']) ? date("d/m/Y", strtotime($sec['exam_date'])) : "Chưa xếp",
+            "gioThi"   => $ca_thi_label,
+            "phongThi" => $phong_hien_thi,
+            "diaDiem"  => $dia_diem_hien_thi,
+            "students" => $students_in_section
+        ];
     }
 
 } catch (Exception $e) {
     echo "<div class='alert alert-danger m-3'><strong>Lỗi CSDL SQLite:</strong> " . $e->getMessage() . "</div>";
 }
 
-// Cập nhật lại nhãn hiển thị tên ngành: Lấy trực tiếp từ biến $khoa_nganh ban đầu để giữ lại chữ "Khoa"
 $khoa = ($khoa_nganh !== 'Tất cả các Khoa' && !empty($khoa_nganh)) ? $khoa_nganh : "Tất cả các ngành";
 ?>
 
@@ -209,13 +204,6 @@ $khoa = ($khoa_nganh !== 'Tất cả các Khoa' && !empty($khoa_nganh)) ? $khoa_
     <img src="banner.png" alt="Banner HUB" class="banner-img">
 
     <div class="text-center">
-        <div class="badge-container">
-            <div class="badge-info-custom"><strong>Năm học:</strong> <?php echo htmlspecialchars($nam_hoc); ?></div>
-            <div class="badge-info-custom"><strong>Học kì:</strong> <?php echo htmlspecialchars($hoc_ki); ?></div>
-            <div class="badge-info-custom"><strong>Ngành:</strong> <?php echo htmlspecialchars($khoa); ?></div>
-            <div class="badge-info-custom"><strong>Đợt thi:</strong> <?php echo htmlspecialchars($thoi_gian); ?></div>
-            <div class="badge-info-custom"><strong>Ngày thi:</strong> <?php echo ($exam_date === 'all') ? 'Tất cả các ngày' : date('d/m/Y', strtotime($exam_date)); ?></div>
-        </div>
     </div>
 
     <div class="search-container">
@@ -247,7 +235,7 @@ $khoa = ($khoa_nganh !== 'Tất cả các Khoa' && !empty($khoa_nganh)) ? $khoa_
                         <th style="width: 18%;">Lớp học phần</th>
                         <th style="width: 32%;">Tên học phần</th>
                         <th style="width: 14%;">Ngày thi</th>
-                        <th style="width: 12%;">Giờ thi</th>
+                        <th style="width: 12%;">Giờ thi / Ca thi</th>
                         <th style="width: 12%;">Phòng thi</th>
                         <th style="width: 12%;">Địa điểm</th>
                     </tr>
@@ -273,11 +261,11 @@ $khoa = ($khoa_nganh !== 'Tất cả các Khoa' && !empty($khoa_nganh)) ? $khoa_
                         <th style="width: 5%;">STT</th>
                         <th style="width: 15%;">Lớp học phần</th>
                         <th style="width: 25%;">Tên học phần</th>
+                        <th style="width: 10%;">Số lượng SV</th>
                         <th style="width: 12%;">Ngày thi</th>
-                        <th style="width: 10%;">Giờ thi</th>
-                        <th style="width: 15%;">Phòng thi</th>
-                        <th style="width: 13%;">Địa điểm</th>
-                        <th style="width: 10%;">Hành động</th>
+                        <th style="width: 12%;">Ca thi cụ thể</th>
+                        <th style="width: 13%;">Phòng thi cấp phát</th>
+                        <th style="width: 8%;">Hành động</th>
                     </tr>
                 </thead>
                 <tbody id="mainTableBody">
@@ -312,7 +300,7 @@ $khoa = ($khoa_nganh !== 'Tất cả các Khoa' && !empty($khoa_nganh)) ? $khoa_
                             Phòng thi: <strong id="modalPhongThi"></strong>
                         </div>
                         <div class="col-12">
-                            Giờ thi: <strong id="modalGioThi"></strong>
+                            Ca thi: <strong id="modalGioThi"></strong>
                         </div>
                         <div class="col-12">
                             Ngày thi: <strong id="modalNgayThi"></strong>
@@ -330,7 +318,7 @@ $khoa = ($khoa_nganh !== 'Tất cả các Khoa' && !empty($khoa_nganh)) ? $khoa_
                                 <th style="width: 8%;">STT</th>
                                 <th style="width: 25%;">Mã số sinh viên</th>
                                 <th style="width: 42%;" class="text-start ps-3">Họ và tên</th>
-                                <th style="width: 25%;">Ngành</th>
+                                <th style="width: 25%;">Phòng riêng</th>
                             </tr>
                         </thead>
                         <tbody id="modalTableBody"></tbody>
@@ -352,7 +340,6 @@ $khoa = ($khoa_nganh !== 'Tất cả các Khoa' && !empty($khoa_nganh)) ? $khoa_
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
 <script>
-// Nhận mảng JSON từ PHP một cách an toàn
 var localDataArr = <?php echo json_encode($lich_thi_hoan_thinh, JSON_UNESCAPED_UNICODE); ?>;
 var studentModalObj = new bootstrap.Modal(document.getElementById('studentListModal'));
 var currentActiveLhp = ""; 
@@ -372,13 +359,13 @@ function renderMainTable() {
             <td>${index + 1}</td>
             <td class="fw-semibold text-primary">${row.lhp}</td>
             <td class="text-start ps-2">${row.tenHp}</td>
+            <td class="fw-bold text-success">${row.siSo}</td>
             <td>${row.ngayThi}</td>
             <td>${row.gioThi}</td>
             <td><span class="badge ${badgeClass} px-2 py-1">${row.phongThi}</span></td>
-            <td class="text-muted small">${row.diaDiem}</td>
             <td>
                 <button type="button" class="btn btn-outline-primary btn-sm btn-xem-ds" data-malop="${row.lhp}">
-                    <i class="bi bi-eye"></i> Xem danh sách
+                    <i class="bi bi-eye"></i> Chi tiết
                 </button>
             </td>
         </tr>`;
@@ -398,7 +385,7 @@ document.addEventListener('click', function(event) {
     const targetData = localDataArr.find(item => item.lhp === maLopHocPhan);
     
     if (targetData) {
-        document.getElementById('modalTitle').innerText = `DANH SÁCH SINH VIÊN THI - LỚP: ${targetData.lhp}`;
+        document.getElementById('modalTitle').innerText = `CHI TIẾT LỚP HỌC PHẦN - LỚP: ${targetData.lhp}`;
         document.getElementById('modalMonHoc').innerText = targetData.tenHp;
         document.getElementById('modalPhongThi').innerText = targetData.phongThi;
         document.getElementById('modalGioThi').innerText = targetData.gioThi;
@@ -411,7 +398,7 @@ document.addEventListener('click', function(event) {
                 <td class="fw-bold text-muted">${index + 1}</td>
                 <td class="font-monospace fw-semibold">${student.mssv}</td>
                 <td class="text-start ps-3">${student.ho_ten}</td>
-                <td><span class="badge bg-light text-dark border">${student.lop_ql}</span></td>
+                <td><span class="badge bg-light text-dark border">${student.room_id}</span></td>
             </tr>`;
         });
         document.getElementById('modalTableBody').innerHTML = htmlRows;
@@ -471,27 +458,20 @@ function resetSearchState() {
 
 function handleKeyPress(event) { if (event.key === "Enter") { executeSearch(); } }
 function exportToExcel() {
-    // 1. Kiểm tra xem vùng hiển thị lịch thi cá nhân có đang MỞ hay không
     var isPersonalMode = document.getElementById("personalResultSection").style.display === "block";
     
     if (isPersonalMode) {
-        // NGƯỜI DÙNG ĐANG TRA CỨU CÁ NHÂN -> Xuất lịch thi của sinh viên đó
         var mssv = document.getElementById("targetMssvLabel").innerText.trim();
         var table = document.querySelector("#personalResultSection table");
         var workbook = XLSX.utils.table_to_book(table, {sheet: "Lịch thi cá nhân"});
-        
-        // Đặt tên file động theo MSSV của sinh viên để dễ quản lý
         XLSX.writeFile(workbook, `Lich_Thi_Sinh_Vien_${mssv}.xlsx`);
     } else {
-        // NGƯỜI DÙNG ĐANG XEM TOÀN TRƯỜNG -> Xuất lịch thi tổng thể
         var table = document.getElementById("lichThiTable");
         var workbook = XLSX.utils.table_to_book(table, {sheet: "Lịch Thi Tổng Thể"});
-        
         XLSX.writeFile(workbook, "Lich_Thi_Tong_The_HUB.xlsx");
     }
 }
 
-// Giữ nguyên hàm xuất danh sách phòng thi khi click xem chi tiết modal (nếu cần)
 function exportRoomExcel() { 
     var table = document.querySelector("#studentListModal table"); 
     var workbook = XLSX.utils.table_to_book(table, {sheet: "Phòng Thi"}); 
