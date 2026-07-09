@@ -1,9 +1,8 @@
 import random
+from ga.chromosome import Gene
 
 def mutate(chromosome, scheduler, mutation_rate=0.1):
-    """
-    Toán tử đột biến. Giúp quần thể thoát khỏi điểm cực trị địa phương.
-    """
+    
     for i, gene in enumerate(chromosome.genes):
         if random.random() < mutation_rate:
             # 1. Đột biến Ca thi
