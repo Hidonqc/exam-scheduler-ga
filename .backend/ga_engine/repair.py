@@ -1,9 +1,6 @@
-
+from ga.chromosome import Gene
 def repair_chromosome(chromosome, scheduler):
-    """
-    Toán tử sửa chữa (Repair Operator).
-    Sử dụng Sequential Search để nắn chỉnh các lỗi sinh ra sau quá trình di truyền.
-    """
+   
     # Mapping tạm để tăng tốc kiểm tra lỗi trùng phòng
     timeslot_section_map = {}
     for gene in chromosome.genes:
@@ -40,13 +37,11 @@ def repair_chromosome(chromosome, scheduler):
                 if is_violated:
                     break
                     
-        # Sửa lỗi: Duyệt lại các phòng/ca thi hợp lệ (Greedy/Heuristic)
         if is_violated:
             repaired = False
             for ts in scheduler.timeslots:
                 if repaired: break
                 for room, cap in scheduler.rooms.items():
-                    # Tìm một phòng đơn lẻ đủ lớn. (Phiên bản phức tạp hơn có thể nối nhiều phòng ở đây)
                     if cap >= num_students:
                         chromosome.genes[i] = Gene(gene.section_id, ts, [room])
                         repaired = True
