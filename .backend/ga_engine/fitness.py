@@ -2,8 +2,8 @@ class FitnessCalculator:
     def __init__(self, scheduler, w_hard=1000, w_soft=1):
         self.scheduler = scheduler
         self.w_hard = w_hard  # Trọng số áp đảo cho lỗi cứng
-        self.w_soft = w_soft  # Trọng số cho lỗi mềm (có thể bổ sung sau)
-
+        self.w_soft = w_soft  # Trọng số cho lỗi mềm 
+        
     def calculate_fitness(self, chromosome):
         p_student = 0
         p_room = 0
