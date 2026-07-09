@@ -1,10 +1,8 @@
 import random
+from ga.chromosome import Chromosome
 
 def uniform_crossover(parent1, parent2):
-    """
-    Toán tử lai ghép đồng nhất (Uniform Crossover).
-    Lai ghép trực tiếp trên từng lớp học phần giữa hai cá thể cha mẹ.
-    """
+   
     child1 = Chromosome()
     child2 = Chromosome()
     
