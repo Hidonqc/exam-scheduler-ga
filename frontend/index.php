@@ -108,8 +108,7 @@
 
 <div class="container-custom">    
 
-    <img src="banner.png" alt="Banner HUB" class="banner-img" onerror="this.src='https://via.placeholder.com/950x120/dbeafe/1e3a8a?text=TRƯỜNG+ĐẠI+HỌC+NGÂN+HÀNG+TP.+HỒ+CHÍ+MINH'">
-    
+<img src="assets/images/banner.png" alt="Banner HUB" class="banner-img">    
     <div class="system-title">HỆ THỐNG XẾP LỊCH THI TỰ ĐỘNG</div>
 
     <!-- KHỐI 1: THIẾT LẬP -->
@@ -140,7 +139,6 @@
     <div class="card shadow-sm border-0 mb-4" id="result-section" style="display: none;">
         <div class="card-header card-header-blue d-flex justify-content-between align-items-center">
             <span><i class="bi bi-people-fill me-2"></i> 2. Danh sách Lịch thi đã xếp</span>
-            <!-- Nút Xuất Excel thu nhỏ góc phải -->
             <button class="btn btn-sm btn-light text-primary fw-bold" onclick="exportToExcel()">
                 <i class="bi bi-file-earmark-excel-fill text-success"></i> Xuất Excel
             </button>
@@ -156,6 +154,7 @@
                             <th>Ngày thi</th>
                             <th>Ca</th>
                             <th>Phòng thi</th>
+                            <th class="text-center">Danh sách</th> <!-- Cột mới -->
                         </tr>
                     </thead>
                     <tbody id="tableBody">
@@ -218,6 +217,12 @@
                                 <td>${row.ngay_thi}</td>
                                 <td>Ca ${row.ca_thi}</td>
                                 <td class="fw-bold">${row.ma_phong}</td>
+                                <td class="text-center">
+                                    <button class="btn btn-sm btn-outline-primary" style="font-size: 11px;" 
+                                        onclick="showStudents('${row.ma_lhp}', '${row.ten_lhp}', '${row.ngay_thi}', '${row.ca_thi}', '${row.ma_phong}', '${row.so_sv_phong}')">
+                                        <i class="bi bi-eye"></i> Xem danh sách
+                                    </button>
+                                </td>
                             </tr>
                         `;
                     });
@@ -251,6 +256,87 @@
         
         XLSX.writeFile(wb, fileName);
     }
+    async function showStudents(ma_lhp, ten_lhp, ngay_thi, ca_thi, ma_phong, si_so) {
+        // Gắn dữ liệu lên Header Modal
+        document.getElementById('modalTitle').innerText = "DANH SÁCH SINH VIÊN THI - LỚP: " + ma_lhp;
+        document.getElementById('mInfoTen').innerText = ten_lhp;
+        document.getElementById('mInfoPhong').innerText = ma_phong;
+        document.getElementById('mInfoCa').innerText = "Ca " + ca_thi;
+        document.getElementById('mInfoNgay').innerText = ngay_thi;
+        document.getElementById('mInfoSiSo').innerText = si_so + " thí sinh";
+
+        const tbody = document.getElementById('studentListBody');
+        tbody.innerHTML = '<tr><td colspan="4">Đang tải dữ liệu...</td></tr>';
+
+        // Bật Modal lên
+        var myModal = new bootstrap.Modal(document.getElementById('studentListModal'));
+        myModal.show();
+
+        // Lấy dữ liệu sinh viên
+        try {
+            const res = await fetch('ajax.php?action=get_students&ma_lhp=' + encodeURIComponent(ma_lhp));
+            const result = await res.json();
+            
+            if (result.status === 'success') {
+                tbody.innerHTML = '';
+                result.data.forEach((sv, index) => {
+                    tbody.innerHTML += `
+                        <tr>
+                            <td>${index + 1}</td>
+                            <td class="fw-bold">${sv.mssv}</td>
+                            <td class="text-start">${sv.ho_ten}</td>
+                            <td class="text-muted">${sv.nganh}</td>
+                        </tr>
+                    `;
+                });
+            }
+        } catch (error) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-danger">Lỗi tải dữ liệu!</td></tr>';
+        }
+    }
 </script>
+<!-- MODAL DANH SÁCH SINH VIÊN -->
+<div class="modal fade" id="studentListModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content border-0 shadow-lg">
+      <div class="modal-header" style="background-color: #2c304d; color: white;">
+        <h5 class="modal-title fw-bold" id="modalTitle" style="font-size: 15px;">DANH SÁCH SINH VIÊN THI - LỚP:</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-4 bg-light">
+        <!-- Khối thông tin chung -->
+        <div class="bg-white p-3 rounded border mb-3">
+            <div class="row mb-2"><div class="col-3 text-muted">Môn học:</div><div class="col-9 fw-bold text-primary" id="mInfoTen"></div></div>
+            <div class="row mb-2"><div class="col-3 text-muted">Phòng thi:</div><div class="col-9 fw-bold text-dark" id="mInfoPhong"></div></div>
+            <div class="row mb-2"><div class="col-3 text-muted">Ca thi:</div><div class="col-9 fw-bold text-dark" id="mInfoCa"></div></div>
+            <div class="row mb-2"><div class="col-3 text-muted">Ngày thi:</div><div class="col-9 fw-bold text-dark" id="mInfoNgay"></div></div>
+            <hr>
+            <div class="row"><div class="col-3 text-muted">Tổng số thí sinh:</div><div class="col-9"><span class="badge bg-primary px-3 rounded-pill" id="mInfoSiSo"></span></div></div>
+        </div>
+        <!-- Bảng danh sách -->
+        <div class="table-responsive bg-white border rounded" style="max-height: 300px;">
+            <table class="table table-hover table-sm mb-0 text-center" style="font-size: 13px;">
+                <thead class="table-dark sticky-top">
+                    <tr>
+                        <th>STT</th>
+                        <th>Mã số sinh viên</th>
+                        <th class="text-start">Họ và tên</th>
+                        <th>Ngành</th>
+                    </tr>
+                </thead>
+                <tbody id="studentListBody">
+                    <!-- Data từ AJAX đổ vào đây -->
+                </tbody>
+            </table>
+        </div>
+      </div>
+      <div class="modal-footer bg-light justify-content-between">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Đóng cửa sổ</button>
+        <button type="button" class="btn btn-submit-custom btn-sm w-auto px-4"><i class="bi bi-file-earmark-arrow-down"></i> Xuất danh sách phòng</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
