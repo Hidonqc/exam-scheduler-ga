@@ -23,7 +23,11 @@ exam-scheduler-ga/
 ├── generation/           # Chứa các log tiến trình hoặc file tạm sinh ra trong lúc chạy
 └── README.md             # Tài liệu dự án
 
-⚙️ Hướng Dẫn Cài Đặt & Khởi Chạy
+
+
+
+
+#⚙️ Hướng Dẫn Cài Đặt & Khởi Chạy
 Yêu cầu hệ thống
 Đã cài đặt Python 3.8+
 
